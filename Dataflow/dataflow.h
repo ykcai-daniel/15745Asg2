@@ -63,7 +63,7 @@ namespace llvm {
 			// Map from Element to its offset in BitVector, should be captured by GenFunc and KillFunc.
 			using BitVectorOffsetMap = DenseMap<Element, int>;
 			using OffsetToElementMap = DenseMap<int, Element>;
-
+			// Transfer function: OUT[BB] = transferFunc(IN[BB], BB), need to print result after each instruction.
 			using TransferFunction = std::function<BitVector(BitVector,const BasicBlock*)>;
 
 		
@@ -95,15 +95,15 @@ namespace llvm {
 		// BitVectorOffsetMap should be captured by genFunc and killFunc to create BitVectors for each basic block.
 		static BitVectorOffsetMap createBitVectorOffsetMap(const Function& func, const std::function<std::vector<Element>(const Instruction*)>& getElementsFromInstruction) {
 			// Initialize bitVectorSize_ and elementToOffset_ by iterating over all instructions in func.
-			int bitVectorSize_ = 0;
+			int bitVectorSize = 0;
 			BitVectorOffsetMap elementToOffset;
 			for (const BasicBlock& bb : func) {
 				for (const Instruction& inst : bb) {
 					std::vector<Element> elements = getElementsFromInstruction(&inst);
 					for (const Element& elem : elements) {
 						if (elementToOffset.find(elem) == elementToOffset.end()) {
-							elementToOffset[elem] = bitVectorSize_;
-							bitVectorSize_++;
+							elementToOffset[elem] = bitVectorSize;
+							bitVectorSize++;
 						}
 					}
 				}
