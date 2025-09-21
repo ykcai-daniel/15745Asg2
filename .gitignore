@@ -1,0 +1,10 @@
+*.so
+*.o
+
+*.bc
+*.bcclear
+
+.idea/
+.cache/
+build/
+.vscode/
