@@ -60,9 +60,9 @@ namespace llvm {
 			// Meet operator.
 			using MeetOperator = std::function<BitVector(const BitVector&,const BitVector&)>;
 			// Gen function of each basic block.
-			using GenFunc = std::function<std::vector<Element>(const BasicBlock&)>;
+			using GenFunc = std::function<BitVector( BasicBlock*)>;
 			// Kill function of each basic block.
-			using KillFunc = std::function<std::vector<Element>(const BasicBlock&)>;
+			using KillFunc = std::function<BitVector( BasicBlock*)>;
 			// Map from Element to its offset in BitVector, shoulb be captured by GenFunc and KillFunc.
 			using BitVectorOffsetMap = DenseMap<Element, int>;
 
@@ -134,8 +134,8 @@ namespace llvm {
                 	}
 				}
 
-				BitVector& gen = genFunc_(BB);
-				BitVector& kill = killFunc_(BB);
+				BitVector gen = genFunc_(BB);
+				BitVector kill = killFunc_(BB);
 				BitVector newOut = gen + (newIn - kill);
 				
 				if(newOut!=oldOut){

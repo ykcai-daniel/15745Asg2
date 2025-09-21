@@ -19,9 +19,42 @@ namespace {
 		public:
 			static char ID;
 
+			using ExprAnalysis = DataflowAnalysis<Expression>;
+
 			AvailableExpressions() : FunctionPass(ID) { }
 
 			virtual bool runOnFunction(Function& F) {
+
+				// Step 1: Create BitVectorOffsetMap by iterating over all instructions in F and applying getElementsFromInstruction to each instruction.
+				auto getElementsFromInstruction = [](const Instruction* inst) -> Expression {
+					// TODO
+					if (const BinaryOperator* binOp = dyn_cast<BinaryOperator>(inst)) {
+						return Expression(binOp);
+					}
+					return Expression(nullptr);
+				};
+				ExprAnalysis::BitVectorOffsetMap elementToOffset = ExprAnalysis::createBitVectorOffsetMap(F, getElementsFromInstruction);
+
+				// Step 2: Define meet operator, gen function and kill function.
+				auto meetOperator = [](const BitVector& a, const BitVector& b) -> BitVector {
+					// TODO
+					// Suppose we are using union as the meet operator.
+					return a + b;
+				};
+
+				// Capture the elementToOffset map by value to use inside the lambda.
+				auto genFunc = [&elementToOffset]( BasicBlock* bb) -> BitVector {
+					// TODO
+				};
+
+				auto killFunc = [&elementToOffset](BasicBlock* bb) -> BitVector {
+					// TODO
+
+				};
+
+				// Init and Run the analysis
+
+
 				std::vector<Expression> expressions;
 				// Here's some code to familarize you with the Expression
 				// class and pretty printing code we've provided:
