@@ -58,11 +58,11 @@ namespace llvm {
 			// ResultMap maps each BasicBlock to OUT[BB].
 			using ResultMap = DenseMap<BasicBlock*, BitVector>;
 			// Meet operator.
-			using MeetOperator = std::function<BitVector(const BitVector&,const BitVector&)>;
+			using MeetOperator = std::function<BitVector(const BitVector&, const BitVector&)>;
 			// Gen function of each basic block.
-			using GenFunc = std::function<BitVector( BasicBlock*)>;
+			using GenFunc = std::function<BitVector(BasicBlock*)>;
 			// Kill function of each basic block.
-			using KillFunc = std::function<BitVector( BasicBlock*)>;
+			using KillFunc = std::function<BitVector(BasicBlock*)>;
 			// Map from Element to its offset in BitVector, shoulb be captured by GenFunc and KillFunc.
 			using BitVectorOffsetMap = DenseMap<Element, int>;
 
@@ -80,7 +80,13 @@ namespace llvm {
 			bool entryInit,
 			// TODO(optional): make outInit type trait of MeetOperator
 			bool outInit
-		){}
+		):
+			meetOperator_(meetOperator),
+			genFunc_(genFunc),
+			killFunc_(killFunc),
+			bitVectorSize_(numElements),
+			entryInitValue_(entryInit),
+			outInitValue_(outInit){}
 
 		
 		// Create BitVectorOffsetMap by iterating over all instructions in func and applying getElementsFromInstruction to each instruction.
@@ -121,14 +127,16 @@ namespace llvm {
 				BitVector& oldOut = basicBlockResultIter->second;
 				pred_range parentBBs = predecessors(BB);
 
-				BitVector newIn(bitVectorSize_);
+				// Initialize to TOP: TOP meet X = X
+				BitVector newIn(bitVectorSize_,outInitValue_);
+				// If it is the entry block.
 				if(parentBBs.empty()){
-					// TODO: Check initialization.
-					newIn = entryInit_;
+					newIn = BitVector(bitVectorSize_,entryInitValue_);
 
 				} else{
 					for (auto *pred : predecessors(BB)) {
-						auto& [iter, predNotInitiliazed] = resultMap.try_emplace(pred,BitVector());
+						// Initialize to Top.
+						auto& [iter, predNotInitiliazed] = resultMap.try_emplace(pred,BitVector(bitVectorSize_,outInitValue_));
 						BitVector& predOut = iter;
                     	newIn = meetOperator_(newIn, predOut);
                 	}
@@ -142,7 +150,6 @@ namespace llvm {
 					changed = true;
 					resultMap[BB] = std::move(newOut);
 				}
-
             }
         } while (changed);
 			return resultMap;
@@ -152,10 +159,9 @@ namespace llvm {
 			MeetOperator meetOperator_;
 			GenFunc genFunc_;
 			KillFunc killFunc_;
-			BitVector entryInit_;
-			BitVector outInit_;
 			int bitVectorSize_;
-			ResultMap resultMap_;
+			bool entryInitValue_;
+			bool outInitValue_;
 	};
 
 }
