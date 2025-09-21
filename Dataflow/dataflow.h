@@ -50,7 +50,7 @@ namespace llvm {
 	// (1) Define your own Element class for this analysis, and provide std::hash and equals operator for it.
 	// 		Element is constructed from Instruction* or Value*, so you can store Instruction* or Value* inside Element.
 	// (2) Provide lambda MeetOperator, Gen and Kill Function.
-	template <class Element>
+	template <class Element, bool Forward = true>
 	class DataflowAnalysis{
 
 		public:
@@ -59,12 +59,15 @@ namespace llvm {
 			using ResultMap = DenseMap<BasicBlock*, BitVector>;
 			// Meet operator.
 			using MeetOperator = std::function<BitVector(const BitVector&, const BitVector&)>;
-			// Gen function of each basic block.
-			using GenFunc = std::function<BitVector(BasicBlock*)>;
-			// Kill function of each basic block.
-			using KillFunc = std::function<BitVector(BasicBlock*)>;
-			// Map from Element to its offset in BitVector, shoulb be captured by GenFunc and KillFunc.
+
+			// Map from Element to its offset in BitVector, should be captured by GenFunc and KillFunc.
 			using BitVectorOffsetMap = DenseMap<Element, int>;
+			using OffsetToElementMap = DenseMap<int, Element>;
+
+			using TransferFunction = std::function<BitVector(BitVector,const BasicBlock*)>;
+
+		
+
 
 		// @param meetOperator: function to compute meet of two BitVectors.
 		// @param genFunc: function to compute gen set of a basic block. Should return a BitVector.
@@ -74,16 +77,14 @@ namespace llvm {
 		// @param outInit: initial value for OUT[BB] for all other blocks.
 		DataflowAnalysis(
 			const MeetOperator& meetOperator,
-			const GenFunc& genFunc,
-			const KillFunc& killFunc,
+			const TransferFunction& transferFunction,
 			int numElements,
 			bool entryInit,
 			// TODO(optional): make outInit type trait of MeetOperator
 			bool outInit
-		):
+		):  
 			meetOperator_(meetOperator),
-			genFunc_(genFunc),
-			killFunc_(killFunc),
+			transferFunc_(transferFunction),
 			bitVectorSize_(numElements),
 			entryInitValue_(entryInit),
 			outInitValue_(outInit){}
@@ -111,20 +112,25 @@ namespace llvm {
 		}
 
 		// Perform forward dataflow analysis on the given function.
-		ResultMap analyzeForward(Function& func){
-			ReversePostOrderTraversal<Function*> reversePostOrderIter(&func);
-			ResultMap resultMap;
+		ResultMap analyze(Function& func, const OffsetToElementMap& map){
+			std::vector<BasicBlock*> PostOrder(po_begin(&func), po_end(&func));
+			// Now iterate in reverse (which gives you RPO)
+			if(!Forward){
+				std::reverse(PostOrder.begin(), PostOrder.end());
+			}
 
-			BasicBlock* firstBasicBlock = *reversePostOrderIter.begin();
-			
+			ResultMap resultMap;
 			bool changed;
         do {
             changed = false;
-            for (auto *BB : reversePostOrderIter) {
+            for (auto *BB : PostOrder) {
 
 				auto basicBlockResultIter = resultMap.find(BB);
 				BitVector& oldOut = basicBlockResultIter->second;
 				pred_range parentBBs = predecessors(BB);
+				if(!Forward){
+					parentBBs = successors(BB);
+				}
 
 				// Initialize to TOP: TOP meet X = X
 				BitVector newIn(bitVectorSize_,outInitValue_);
@@ -139,11 +145,11 @@ namespace llvm {
 						BitVector& predOut = iter;
                     	newIn = meetOperator_(newIn, predOut);
                 	}
-				}
+				};
 
-				BitVector gen = genFunc_(BB);
-				BitVector kill = killFunc_(BB);
-				BitVector newOut = gen + (newIn - kill);
+				printBitVector(newIn, map);
+				BitVector newOut = transferFunc_(newIn,BB);
+				printBitVector(newOut, map);
 				
 				if(newOut!=oldOut){
 					changed = true;
@@ -155,9 +161,12 @@ namespace llvm {
 		}
 
 		private:
+			void printBitVector(const BitVector& vec,  const OffsetToElementMap& map) const {
+				// TODO
+			}
+
 			MeetOperator meetOperator_;
-			GenFunc genFunc_;
-			KillFunc killFunc_;
+			TransferFunction transferFunc_;
 			int bitVectorSize_;
 			bool entryInitValue_;
 			bool outInitValue_;
