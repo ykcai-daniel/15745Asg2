@@ -1,5 +1,5 @@
 // 15-745 Assignment 2: available.cpp
-// Group:
+// Group: Haojia Sun (haojias), Yikang Cai (dcai)
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "llvm/IR/Function.h"
@@ -19,42 +19,9 @@ namespace {
 		public:
 			static char ID;
 
-			using ExprAnalysis = DataflowAnalysis<Expression>;
-
 			AvailableExpressions() : FunctionPass(ID) { }
 
 			virtual bool runOnFunction(Function& F) {
-
-				// Step 1: Create BitVectorOffsetMap by iterating over all instructions in F and applying getElementsFromInstruction to each instruction.
-				auto getElementsFromInstruction = [](const Instruction* inst) -> Expression {
-					// TODO
-					if (const BinaryOperator* binOp = dyn_cast<BinaryOperator>(inst)) {
-						return Expression(binOp);
-					}
-					return Expression(nullptr);
-				};
-				ExprAnalysis::BitVectorOffsetMap elementToOffset = ExprAnalysis::createBitVectorOffsetMap(F, getElementsFromInstruction);
-
-				// Step 2: Define meet operator, gen function and kill function.
-				auto meetOperator = [](const BitVector& a, const BitVector& b) -> BitVector {
-					// TODO
-					// Suppose we are using union as the meet operator.
-					return a + b;
-				};
-
-				// Capture the elementToOffset map by value to use inside the lambda.
-				auto genFunc = [&elementToOffset]( BasicBlock* bb) -> BitVector {
-					// TODO
-				};
-
-				auto killFunc = [&elementToOffset](BasicBlock* bb) -> BitVector {
-					// TODO
-
-				};
-
-				// Init and Run the analysis
-
-
 				std::vector<Expression> expressions;
 				// Here's some code to familarize you with the Expression
 				// class and pretty printing code we've provided:
@@ -68,6 +35,83 @@ namespace {
 				// Print out the expressions used in the function
 				outs() << "Expressions used by this function:\n";
 				printSet(&expressions);
+
+				// get the expressions -> index mapping by calling createBitVectorOffsetMap
+				DenseMap<Expression, int> elementToOffset =
+					DataflowAnalysis<Expression>::createBitVectorOffsetMap(F,
+						[](const Instruction* I) -> std::vector<Expression> {
+							std::vector<Expression> elems;
+							if (auto *BI = dyn_cast<BinaryOperator>(I)) {
+								elems.push_back(Expression((Instruction*)I));
+							}
+							return elems;
+						});
+				int bitVectorSize = elementToOffset.size();
+
+				// define meet operator for available expression analysis: intersection
+				DataflowAnalysis<Expression>::MeetOperator meetOperator = [](const BitVector& a, const BitVector& b) {
+					BitVector res = a;
+					res &= b;
+					return res;
+				};
+
+				auto genFunc = [&](BasicBlock* BB) {
+					BitVector gen(bitVectorSize, false);
+					for (Instruction &I : *BB) {
+						if (auto *BI = dyn_cast<BinaryOperator>(&I)) {
+							Expression e(&I);
+							int idx = elementToOffset.lookup(e);
+
+							bool killedLater = false;
+							// Check if the current LHS variable kills expr, e.g., B = B + C
+							if (e.v1 == &I || e.v2 == &I) {
+								killedLater = true;
+							}
+
+							// Check if the following LHS variables kill expr, e.g., A = B + C; B = E + D
+							for (auto it = std::next(I.getIterator()); it != BB->end(); ++it) {
+								Value *lhs = &*it;
+								if (e.v1 == lhs || e.v2 == lhs) {
+									killedLater = true;
+									break;
+								}
+							}
+
+							if (!killedLater) {
+								gen.set(idx);
+							}
+						}
+					}
+					return gen;
+				};
+
+				auto killFunc = [&](BasicBlock* BB) {
+					BitVector kill(bitVectorSize, false);
+					// Kill all expressions that depend on the LHS of any instruction in BB
+					for (Instruction &I : *BB) {
+						Value *lhs_var = &I;
+						// Find all expressions in the universal set E that depend on lhs and kill them
+						for (auto &expr_idx : elementToOffset) {
+							const Expression &expr = expr_idx.first;
+							int idx = expr_idx.second;
+							if (expr.v1 == lhs_var || expr.v2 == lhs_var) {
+								kill.set(idx);
+							}
+						}
+					}
+					return kill;
+				};
+
+				DataflowAnalysis<Expression> analysis(
+					meetOperator,
+					genFunc,
+					killFunc,
+					bitVectorSize,
+					false,  // entryInitValue_ = empty set
+					true    // outInitValue_ = universal set
+				);
+
+				auto result = analysis.analyzeForward(F);
 
 				// Did not modify the incoming Function.
 				return false;
