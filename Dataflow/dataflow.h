@@ -74,7 +74,7 @@ namespace llvm {
 		// Create BitVectorOffsetMap by iterating over all instructions in func and applying getElementsFromInstruction to each instruction.
 		// The returned BitVectorOffsetMap maps each Element to a unique offset in the BitVector.
 		// BitVectorOffsetMap should be captured by genFunc and killFunc to create BitVectors for each basic block.
-		static BitVectorOffsetMap createBitVectorOffsetMap(const Function& func, const std::function<std::vector<Element>(Instruction*)>& getElementsFromInstruction) {
+		static BitVectorOffsetMap createBitVectorOffsetMap(const Function& func, const std::function<std::vector<Element>(const Instruction*)>& getElementsFromInstruction) {
 			// Initialize bitVectorSize_ and elementToOffset_ by iterating over all instructions in func.
 			int bitVectorSize = 0;
 			BitVectorOffsetMap elementToOffset;

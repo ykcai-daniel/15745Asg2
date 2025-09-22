@@ -22,6 +22,31 @@ namespace {
 			AvailableExpressions() : FunctionPass(ID) { }
 
 			virtual bool runOnFunction(Function& F) {
+				// Map each Value* to its representative in the alias set
+				DenseMap<Value*, Value*> aliasMap;
+
+				// A helper to find canonical representative
+				std::function<Value*(Value*)> findRepresentative = [&](Value *v) -> Value* {
+					while (aliasMap.count(v)) {
+						v = aliasMap[v];
+					}
+					return v;
+				};
+
+				// Build alias sets by scanning phi instructions
+				for (auto &B : F) {
+					for (auto &I : B) {
+						if (auto *phi = dyn_cast<PHINode>(&I)) {
+							Value *lhs = &I; // phi result
+							for (unsigned i = 0; i < phi->getNumIncomingValues(); i++) {
+								Value *rhs = phi->getIncomingValue(i);
+								// Union: map rhs -> lhs
+								aliasMap[rhs] = lhs;
+							}
+						}
+					}
+				}
+
 				std::vector<Expression> expressions;
 				// Here's some code to familarize you with the Expression
 				// class and pretty printing code we've provided:
@@ -39,10 +64,15 @@ namespace {
 				// get the expressions -> index mapping by calling createBitVectorOffsetMap
 				DenseMap<Expression, int> elementToOffset =
 					DataflowAnalysis<Expression>::createBitVectorOffsetMap(F,
-						[](const Instruction* I) -> std::vector<Expression> {
+						[&](const Instruction* I) -> std::vector<Expression> {
 							std::vector<Expression> elems;
 							if (auto *BI = dyn_cast<BinaryOperator>(I)) {
-								elems.push_back(Expression((Instruction*)I));
+								Expression e((Instruction*)I);
+
+								e.v1 = findRepresentative(e.v1);
+								e.v2 = findRepresentative(e.v2);
+
+								elems.push_back(e);
 							}
 							return elems;
 						});
@@ -64,18 +94,22 @@ namespace {
 					BitVector gen(bitVectorSize, false);
 					if (auto *BI = dyn_cast<BinaryOperator>(&I)) {
 						Expression e(&I);
+						e.v1 = findRepresentative(e.v1);
+        				e.v2 = findRepresentative(e.v2);
+						
 						int idx = elementToOffset.lookup(e); // find all expressions in the universal set E
 
 						bool killedLater = false;
+						Value* lhs_var = findRepresentative(&I);
 						// Check if the current LHS variable kills expr, e.g., B = B + C
-						Value* lhs_var = &I;
-						if (e.v1 == lhs_var || e.v2 == lhs_var) {
+						if (findRepresentative(e.v1) == lhs_var || findRepresentative(e.v2) == lhs_var) {
 							killedLater = true;
 						}
+						
 						// Check if the following LHS variables kill expr, e.g., A = B + C; B = E + D
 						for (auto it = std::next(I.getIterator()); it != I.getParent()->end(); ++it) {
-							Value *lhs_var = &*it;
-							if (e.v1 == lhs_var || e.v2 == lhs_var) {
+							Value *lhs2 = findRepresentative(&*it);
+							if (findRepresentative(e.v1) == lhs2 || findRepresentative(e.v2) == lhs2) {
 								killedLater = true;
 								break;
 							}
@@ -91,12 +125,12 @@ namespace {
 				// define KILL function for each instruction in a basic block
 				auto computeKill = [&](Instruction &I) {
 					BitVector kill(bitVectorSize, false);
-					Value *lhs_var = &I;
+					Value *lhs_var = findRepresentative(&I);
 					// Find all expressions in the universal set E that depend on lhs and kill them
 					for (auto &expr_idx : elementToOffset) {
 						const Expression &expr = expr_idx.first;
 						int idx = expr_idx.second;
-						if (expr.v1 == lhs_var || expr.v2 == lhs_var) {
+						if (findRepresentative(expr.v1) == lhs_var || findRepresentative(expr.v2) == lhs_var) {
 							kill.set(idx);
 						}
 					}
