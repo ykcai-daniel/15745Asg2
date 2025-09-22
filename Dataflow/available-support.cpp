@@ -1,5 +1,5 @@
 // 15-745 Assignment 2: available-support.cpp
-// Group:
+// Group: Haojia Sun (haojias), Yikang Cai (dcai)
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "available-support.h"
@@ -9,6 +9,13 @@ namespace llvm {
 	// you work with the expressions we'll be concerned
 	// about for the Available Expression analysis
 	Expression::Expression (Instruction * I) {
+		// Handle DenseMap empty/tombstone keys
+		if (I == (Instruction*)-1 || I == (Instruction*)-2) {
+			v1 = nullptr;
+			v2 = nullptr;
+			op = Instruction::BinaryOps::Add; // arbitrary init
+			return;
+		}
 		if (BinaryOperator * BO = dyn_cast<BinaryOperator>(I)) {
 			this->v1 = BO->getOperand(0);
 			this->v2 = BO->getOperand(1);

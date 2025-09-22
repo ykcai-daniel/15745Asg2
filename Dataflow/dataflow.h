@@ -21,29 +21,10 @@
 #include "llvm/ADT/PostOrderIterator.h"
 
 namespace llvm {
-
 	// Difference operator for BitVector
-	BitVector operator-(const BitVector& a, const BitVector& b) {
-		BitVector result = a;
-		for (int i = 0; i < b.size(); ++i) {
-			if (b.test(i)) {
-				result.reset(i);
-			}
-		}
-		return result;
-	}
-
+	llvm::BitVector operator-(const llvm::BitVector& a, const llvm::BitVector& b);
 	// Union operator for BitVector
-	BitVector operator+(const BitVector& a, const BitVector& b) {
-		BitVector result = a;
-		for (int i = 0; i < b.size(); ++i) {
-			if (b.test(i)) {
-				result.set(i);
-			}
-		}
-		return result;
-	}
-
+	llvm::BitVector operator+(const llvm::BitVector& a, const llvm::BitVector& b);
 
 	// class Element is the element being analyzed. For instance, in reaching definition, Element is a definition.
 	// In available expressions, element is an expression. To use this class, you need to:
@@ -62,9 +43,9 @@ namespace llvm {
 
 			// Map from Element to its offset in BitVector, should be captured by GenFunc and KillFunc.
 			using BitVectorOffsetMap = DenseMap<Element, int>;
-			using OffsetToElementMap = DenseMap<int, Element>;
+			using OffsetToElementMap = DenseMap<int, Element>; // for printing
 			// Transfer function: OUT[BB] = transferFunc(IN[BB], BB), need to print result after each instruction.
-			using TransferFunction = std::function<BitVector(BitVector,BasicBlock*)>;
+			using TransferFunction = std::function<BitVector(BitVector, BasicBlock*)>;
 
 		
 
@@ -125,31 +106,37 @@ namespace llvm {
             changed = false;
             for (auto *BB : PostOrder) {
 
-				auto basicBlockResultIter = resultMap.find(BB);
-				BitVector& oldOut = basicBlockResultIter->second;
-				pred_range parentBBs = predecessors(BB);
-				if(!Forward){
-					parentBBs = successors(BB);
-				}
-
+				BitVector& oldOut = resultMap.try_emplace(
+					BB, BitVector(bitVectorSize_, outInitValue_)
+				).first->second;
 				// Initialize to TOP: TOP meet X = X
-				BitVector newIn(bitVectorSize_,outInitValue_);
-				// If it is the entry block.
-				if(parentBBs.empty()){
-					newIn = BitVector(bitVectorSize_,entryInitValue_);
-
-				} else{
-					for (auto *pred : predecessors(BB)) {
-						// Initialize to Top.
-						auto& [iter, predNotInitiliazed] = resultMap.try_emplace(pred,BitVector(bitVectorSize_,outInitValue_));
-						BitVector& predOut = iter;
-                    	newIn = meetOperator_(newIn, predOut);
-                	}
-				};
-
-				printBitVector(newIn, map);
+				BitVector newIn;
+				if (Forward) {
+					if (pred_empty(BB)) {
+						// entry block init
+						newIn = BitVector(bitVectorSize_, entryInitValue_);
+					} else {
+						newIn = BitVector(bitVectorSize_, outInitValue_);
+						for (auto *Pred : predecessors(BB)) {
+							auto [it, inserted] = resultMap.try_emplace(Pred, BitVector(bitVectorSize_, outInitValue_));
+							BitVector &predOut = it->second;
+							newIn = meetOperator_(newIn, predOut);
+						}
+					}
+				} else {
+					if (succ_empty(BB)) {
+						// exit block init
+						newIn = BitVector(bitVectorSize_, entryInitValue_);
+					} else {
+						newIn = BitVector(bitVectorSize_, outInitValue_);
+						for (auto *Succ : successors(BB)) {
+							auto [it, inserted] = resultMap.try_emplace(Succ, BitVector(bitVectorSize_, outInitValue_));
+							BitVector &succOut = it->second;
+							newIn = meetOperator_(newIn, succOut);
+						}
+					}
+				}
 				BitVector newOut = transferFunc_(newIn,BB);
-				printBitVector(newOut, map);
 				
 				if(newOut!=oldOut){
 					changed = true;
@@ -159,12 +146,8 @@ namespace llvm {
         } while (changed);
 			return resultMap;
 		}
-
+		
 		private:
-			void printBitVector(const BitVector& vec,  const OffsetToElementMap& map) const {
-				// TODO
-			}
-
 			MeetOperator meetOperator_;
 			TransferFunction transferFunc_;
 			int bitVectorSize_;
@@ -172,6 +155,20 @@ namespace llvm {
 			bool outInitValue_;
 	};
 
+	template <class Element>
+	void printBitVector(const BitVector &vec,
+						const DenseMap<int, Element> &map) {
+		outs() << "{";
+		bool first = true;
+		for (int i = 0; i < vec.size(); i++) {
+			if (vec.test(i)) {
+				if (!first) outs() << ", ";
+				outs() << map.lookup(i).toString();
+				first = false;
+			}
+		}
+		outs() << "}\n";
+	}
 }
 
 #endif
