@@ -47,6 +47,8 @@ namespace llvm {
 			// Transfer function: OUT[BB] = transferFunc(IN[BB], BB), need to print result after each instruction.
 			using TransferFunction = std::function<BitVector(BitVector, BasicBlock*)>;
 
+			using InstToElementFunc = std::function<std::vector<Element>(Instruction*)>;
+
 		
 
 
@@ -74,14 +76,14 @@ namespace llvm {
 		// Create BitVectorOffsetMap by iterating over all instructions in func and applying getElementsFromInstruction to each instruction.
 		// The returned BitVectorOffsetMap maps each Element to a unique offset in the BitVector.
 		// BitVectorOffsetMap should be captured by genFunc and killFunc to create BitVectors for each basic block.
-		static BitVectorOffsetMap createBitVectorOffsetMap(const Function& func, const std::function<std::vector<Element>(const Instruction*)>& getElementsFromInstruction) {
+		static BitVectorOffsetMap createBitVectorOffsetMap(Function& func, const InstToElementFunc& getElementsFromInstruction) {
 			// Initialize bitVectorSize_ and elementToOffset_ by iterating over all instructions in func.
 			int bitVectorSize = 0;
 			BitVectorOffsetMap elementToOffset;
-			for (const BasicBlock& bb : func) {
-				for (const Instruction& inst : bb) {
+			for (BasicBlock& bb : func) {
+				for (Instruction& inst : bb) {
 					std::vector<Element> elements = getElementsFromInstruction(&inst);
-					for (const Element& elem : elements) {
+					for (Element& elem : elements) {
 						if (elementToOffset.find(elem) == elementToOffset.end()) {
 							elementToOffset[elem] = bitVectorSize;
 							bitVectorSize++;
@@ -163,7 +165,12 @@ namespace llvm {
 		for (int i = 0; i < vec.size(); i++) {
 			if (vec.test(i)) {
 				if (!first) outs() << ", ";
-				outs() << map.lookup(i).toString();
+				 if constexpr (std::is_pointer<Element>()) {
+					outs() << *map.lookup(i);
+				} else {
+					outs() << map.lookup(i).toString();
+				}
+
 				first = false;
 			}
 		}
