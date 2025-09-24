@@ -5,7 +5,9 @@
 #ifndef __CLASSICAL_DATAFLOW_H__
 #define __CLASSICAL_DATAFLOW_H__
 
+#include <cassert>
 #include <functional>
+#include <llvm-14/llvm/Support/raw_ostream.h>
 #include <llvm/ADT/BitVector.h>
 #include <llvm/IR/BasicBlock.h>
 #include <stdio.h>
@@ -36,22 +38,23 @@ namespace llvm {
 
 		public:
 			// Result of Dataflow Analysis.
-			// ResultMap maps each BasicBlock to OUT[BB].
-			using ResultMap = DenseMap<BasicBlock*, BitVector>;
+			// ResultMap maps each instruction to bit vector state after processing that instruction.
+			using ResultMap = DenseMap<Instruction*, BitVector>;
 			// Meet operator.
 			using MeetOperator = std::function<BitVector(const BitVector&, const BitVector&)>;
 
 			// Map from Element to its offset in BitVector, should be captured by GenFunc and KillFunc.
 			using BitVectorOffsetMap = DenseMap<Element, int>;
 			using OffsetToElementMap = DenseMap<int, Element>; // for printing
-			// Transfer function: OUT[BB] = transferFunc(IN[BB], BB), need to print result after each instruction.
-			using TransferFunction = std::function<BitVector(BitVector, BasicBlock*)>;
+			// Transfer function for a single instruction: state' = transfer(state, inst)
+			using TransferFunction = std::function<BitVector(BitVector, Instruction*)>;
 
 			using InstToElementFunc = std::function<std::vector<Element>(Instruction*)>;
 
 		
 
 
+		// TODO: overloaded constructor, supporing both single instruction and basic block transfer function.
 		// @param meetOperator: function to compute meet of two BitVectors.
 		// @param genFunc: function to compute gen set of a basic block. Should return a BitVector.
 		// @param killFunc: function to compute kill set of a basic block. Should return a BitVector.
@@ -94,58 +97,79 @@ namespace llvm {
 			return std::move(elementToOffset);
 		}
 
-		// Perform forward dataflow analysis on the given function.
+		// Perform forward/backward dataflow analysis on the given function and return per-instruction states.
 		ResultMap analyze(Function& func, const OffsetToElementMap& map){
+			assert(map.size() == bitVectorSize_);
 			std::vector<BasicBlock*> PostOrder(po_begin(&func), po_end(&func));
 			// Now iterate in reverse (which gives you RPO)
 			if(!Forward){
+				outs()<<"Running backward analysis\n";
 				std::reverse(PostOrder.begin(), PostOrder.end());
 			}
 
+			// Maintain per-basic-block boundary sets internally:
+			// Forward: OUT[BB]; Backward: IN[BB]
+			DenseMap<BasicBlock*, BitVector> blockBoundaryMap;
 			ResultMap resultMap;
 			bool changed;
+			int iterations =0;
         do {
             changed = false;
             for (auto *BB : PostOrder) {
 
-				BitVector& oldOut = resultMap.try_emplace(
+				BitVector& oldBoundary = blockBoundaryMap.try_emplace(
 					BB, BitVector(bitVectorSize_, outInitValue_)
 				).first->second;
 				// Initialize to TOP: TOP meet X = X
-				BitVector newIn;
+				BitVector state;
 				if (Forward) {
 					if (pred_empty(BB)) {
 						// entry block init
-						newIn = BitVector(bitVectorSize_, entryInitValue_);
+						state = BitVector(bitVectorSize_, entryInitValue_);
 					} else {
-						newIn = BitVector(bitVectorSize_, outInitValue_);
+						state = BitVector(bitVectorSize_, outInitValue_);
 						for (auto *Pred : predecessors(BB)) {
-							auto [it, inserted] = resultMap.try_emplace(Pred, BitVector(bitVectorSize_, outInitValue_));
+							auto [it, inserted] = blockBoundaryMap.try_emplace(Pred, BitVector(bitVectorSize_, outInitValue_));
 							BitVector &predOut = it->second;
-							newIn = meetOperator_(newIn, predOut);
+							state = meetOperator_(state, predOut);
 						}
 					}
 				} else {
 					if (succ_empty(BB)) {
 						// exit block init
-						newIn = BitVector(bitVectorSize_, entryInitValue_);
+						state = BitVector(bitVectorSize_, entryInitValue_);
 					} else {
-						newIn = BitVector(bitVectorSize_, outInitValue_);
+						state = BitVector(bitVectorSize_, outInitValue_);
 						for (auto *Succ : successors(BB)) {
-							auto [it, inserted] = resultMap.try_emplace(Succ, BitVector(bitVectorSize_, outInitValue_));
-							BitVector &succOut = it->second;
-							newIn = meetOperator_(newIn, succOut);
+							auto [it, inserted] = blockBoundaryMap.try_emplace(Succ, BitVector(bitVectorSize_, outInitValue_));
+							BitVector &succIn = it->second;
+							state = meetOperator_(state, succIn);
 						}
 					}
 				}
-				BitVector newOut = transferFunc_(newIn,BB);
-				
-				if(newOut!=oldOut){
+				// Walk instructions and apply transfer per instruction
+				if (Forward) {
+					for (Instruction &I : *BB) {
+						state = transferFunc_(state, &I);
+						resultMap[&I] = state;
+					}
+				} else {
+					for (auto it = BB->rbegin(); it != BB->rend(); ++it) {
+						Instruction &I = *it;
+						state = transferFunc_(state, &I);
+						resultMap[&I] = state;
+						printBitVector(state, map);
+					}
+				}
+				BitVector newBoundary = state;
+				if(newBoundary!=oldBoundary){
 					changed = true;
-					resultMap[BB] = std::move(newOut);
+					blockBoundaryMap[BB] = std::move(newBoundary);
+					iterations++;
 				}
             }
         } while (changed);
+		outs()<<"Iterations: "<<iterations<<"\n";
 			return resultMap;
 		}
 		
@@ -162,7 +186,7 @@ namespace llvm {
 						const DenseMap<int, Element> &map) {
 		outs() << "{";
 		bool first = true;
-		for (int i = 0; i < vec.size(); i++) {
+		for (int i : vec.set_bits()) {
 			if (vec.test(i)) {
 				if (!first) outs() << ", ";
 				 if constexpr (std::is_pointer<Element>()) {

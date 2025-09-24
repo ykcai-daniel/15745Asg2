@@ -40,11 +40,18 @@ namespace llvm {
 				return "%" + v->getName().str();
 			}
 			else if (isa<Instruction>(v)) {
-				std::string instructionString;
-				llvm::raw_string_ostream rso(instructionString);
-				v->print(rso); // Print the instruction to the raw_string_ostream
-				rso.flush();  
-				return instructionString;
+				std::string s = "";
+				raw_string_ostream * strm = new raw_string_ostream(s);
+				v->print(*strm);
+				std::string inst = strm->str();
+				size_t idx1 = inst.find("%");
+				size_t idx2 = inst.find(" ",idx1);
+				if (idx1 != std::string::npos && idx2 != std::string::npos) {
+					return inst.substr(idx1,idx2-idx1);
+				}
+				else {
+					return "\"" + inst + "\"";
+				}
 			}
 			else if (ConstantInt * cint = dyn_cast<ConstantInt>(v)) {
 				std::string s = "";
@@ -79,19 +86,19 @@ namespace llvm {
 
 	};
 
-		template<> struct DenseMapInfo<Var> {
-		static inline Var getEmptyKey() {
-			return Var((Instruction*)-1); 
-		}
-		static inline Var getTombstoneKey() {
-			return Var((Instruction*)-2);
-		}
-		static unsigned getHashValue(const Var &var) {
-			return (uintptr_t)var.v;
-		}
-		static bool isEqual(const Var &LHS, const Var &RHS) {
-			return LHS.v == RHS.v;
-		}
+	template<> struct DenseMapInfo<Var> {
+	static inline Var getEmptyKey() {
+		return Var((Instruction*)-1); 
+	}
+	static inline Var getTombstoneKey() {
+		return Var((Instruction*)-2);
+	}
+	static unsigned getHashValue(const Var &var) {
+		return (uintptr_t)var.v;
+	}
+	static bool isEqual(const Var &LHS, const Var &RHS) {
+		return LHS.v == RHS.v;
+	}
 	};
 
 
@@ -111,8 +118,10 @@ namespace llvm {
 
 			virtual bool runOnFunction(Function& F) override {
 
+				// All Elements to involve in the analysis.
 				LivenessAnalysis::InstToElementFunc instToElementFunc = [](Instruction* inst)->std::vector<Var>{
-					if(isa<ReturnInst>(inst)){
+					// return and branch are not variables, so they should not be involved.
+					if(isa<ReturnInst>(inst)||isa<BranchInst>(inst)){
 						return {};
 					}
 					return {Var(inst)};
@@ -125,55 +134,67 @@ namespace llvm {
 					offsetToElementMap.insert({v,k});
 				}
 
-				outs()<<"Number of variables: "<<offsetMap.size();
+				// All variables:
+				outs()<<"All variables:";
+				printBitVector(BitVector(offsetMap.size(),true), offsetToElementMap);
 
-				LivenessAnalysis::TransferFunction transferFunction = [&offsetMap,&offsetToElementMap](const BitVector& out, BasicBlock* bb){
+				LivenessAnalysis::TransferFunction transferFunction = [&offsetMap,&offsetToElementMap](const BitVector& out, Instruction* inst){
 					BitVector in = out;
-					// Iterate over instructions in BB in reverse order.
-					for(auto iter=bb->rbegin();iter!=bb->rend();++iter){
+					Instruction& instruction = *inst;
 
-						Instruction& instruction = *iter;
+					Var var(&instruction);
+					// Some instructions are not variables, skip them but keep current state
+					auto offsetMapIter = offsetMap.find(var);
+					if(offsetMapIter == offsetMap.end()){
+						return in;
+					}
+					
+					int offset = offsetMapIter->second;
+					in.reset(offset);
 
-						if(isa<PHINode>(instruction)){
-							continue;
-						}
-
-						Var var(&instruction);
-						
-
-						// The variable on LHS is defined, placed in killset.
-						// With LLVM, LHS is just the instruction itself.
-
-						// Some instructions are not variables, skip them.
-						auto offsetMapIter = offsetMap.find(var);
-						if(offsetMapIter == offsetMap.end()){
-							continue;
-						}
-						
-						int offset = offsetMapIter->second;
-						in.reset(offset);
-
-						// Iterating over all oprands. Due to SSA, a variable will never appear on both LHS and RHS.
-						// So we don't need to consider operations like A=A+B.
-						for(auto oi = instruction.op_begin();oi!=instruction.op_end();++oi){
-							// For each operand, it is put in Gen Set.
-							
-							Value* val = *oi;
-							if(!val){
-								continue;
+					if(isa<PHINode>(&instruction)){
+						// Customized iteration over PHINode
+						PHINode* phi = dyn_cast<PHINode>(&instruction);
+						for(unsigned i = 0; i < phi->getNumIncomingValues(); i++){
+							Value* val = phi->getIncomingValue(i);
+							Var rhsVar(val);
+							auto usedIter = offsetMap.find(rhsVar);
+							if(usedIter != offsetMap.end()){
+								int usedOffset = usedIter->second;
+								in.set(usedOffset);
 							}
-							if (isa<Instruction>(val)) {
-								int offset = offsetMap.find(var)->second;
-								in.set(offset);
-							}
-
-							
 						}
-
-						printBitVector(in, offsetToElementMap);
+						return in;
 					}
 
+					if(BranchInst* br = dyn_cast<BranchInst>(&instruction)){
+						if (br->isConditional()) {
+							Value* condition = br->getCondition();  // Direct method
+							Var rhsVar(condition);
+							auto usedIter = offsetMap.find(rhsVar);
+							if(usedIter != offsetMap.end()){
+								outs()<<"Setting location of "<<rhsVar.toString()<<" at instruction "<<Var(&instruction).toString()<<"\n";
+								int usedOffset = usedIter->second;
+								in.set(usedOffset);
+							}
+						}
+					}
 
+					// Iterating over all operands; add uses to the set
+					for(auto oi = instruction.op_begin();oi!=instruction.op_end();++oi){
+						Value* val = *oi;
+						if(!val){
+							continue;
+						}
+						Var rhsVar(val);
+
+						auto usedIter = offsetMap.find(rhsVar);
+						if(usedIter != offsetMap.end()){
+							outs()<<"Setting location of "<<rhsVar.toString()<<" at instruction "<<Var(&instruction).toString()<<"\n";
+							int usedOffset = usedIter->second;
+							in.set(usedOffset);
+						}
+					}
 					return in;
 				};
 
@@ -185,7 +206,19 @@ namespace llvm {
 
 				LivenessAnalysis analysis(setUnion,transferFunction,offsetMap.size(),false,false);
 				LivenessAnalysis::ResultMap result = analysis.analyze(F, offsetToElementMap);
-				outs()<<"Performed analysis for "<<result.size()<<" elements.";
+				
+				// Iterating over all instructions in the basic blocks, fetch the IN set for each instruction.
+				outs()<<"-------Result Start----------\n";
+				for(auto& bb : F){
+					for(auto& inst : bb){
+						outs()<<inst<<"\n";
+						auto in = result.find(&inst);
+						if(in != result.end()){
+							printBitVector(in->second, offsetToElementMap);
+						}
+					}
+					outs()<<"----Basic Block Boundry----\n";
+				}
 
 				// Did not modify the incoming Function.
 				return false;
