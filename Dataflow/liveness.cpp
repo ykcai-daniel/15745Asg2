@@ -129,7 +129,10 @@ namespace llvm {
 
 				LivenessAnalysis::TransferFunction transferFunction = [&offsetMap,&offsetToElementMap](const BitVector& out, BasicBlock* bb){
 					BitVector in = out;
-					for(auto& instruction: *bb){
+					// Iterate over instructions in BB in reverse order.
+					for(auto iter=bb->rbegin();iter!=bb->rend();++iter){
+
+						Instruction& instruction = *iter;
 
 						if(isa<PHINode>(instruction)){
 							continue;
