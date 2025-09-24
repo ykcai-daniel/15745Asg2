@@ -135,7 +135,7 @@ namespace llvm {
 				}
 
 				// All variables:
-				outs()<<"All variables:";
+				outs()<<"Variables to be analyzed:";
 				printBitVector(BitVector(offsetMap.size(),true), offsetToElementMap);
 
 				LivenessAnalysis::TransferFunction transferFunction = [&offsetMap,&offsetToElementMap](const BitVector& out, Instruction* inst){
@@ -143,15 +143,15 @@ namespace llvm {
 					Instruction& instruction = *inst;
 
 					Var var(&instruction);
-					// Some instructions are not variables, skip them but keep current state
+					// If the current instruction in a variable, it will have an entry in the offset map.
+					// Place the variable in killset if it is defined.
 					auto offsetMapIter = offsetMap.find(var);
-					if(offsetMapIter == offsetMap.end()){
-						return in;
+					if(offsetMapIter != offsetMap.end()){
+						int offset = offsetMapIter->second;
+						in.reset(offset);
 					}
 					
-					int offset = offsetMapIter->second;
-					in.reset(offset);
-
+					// Special processing for PHI node.
 					if(isa<PHINode>(&instruction)){
 						// Customized iteration over PHINode
 						PHINode* phi = dyn_cast<PHINode>(&instruction);
@@ -164,16 +164,19 @@ namespace llvm {
 								in.set(usedOffset);
 							}
 						}
+						outs()<<instruction<<" :";
+						printBitVector(in, offsetToElementMap);
 						return in;
 					}
-
-					if(BranchInst* br = dyn_cast<BranchInst>(&instruction)){
+					
+					// A conditional branch requires the branching variable to be live.
+					BranchInst* br = dyn_cast<BranchInst>(&instruction);
+					if(br){
 						if (br->isConditional()) {
 							Value* condition = br->getCondition();  // Direct method
 							Var rhsVar(condition);
 							auto usedIter = offsetMap.find(rhsVar);
 							if(usedIter != offsetMap.end()){
-								outs()<<"Setting location of "<<rhsVar.toString()<<" at instruction "<<Var(&instruction).toString()<<"\n";
 								int usedOffset = usedIter->second;
 								in.set(usedOffset);
 							}
@@ -190,11 +193,12 @@ namespace llvm {
 
 						auto usedIter = offsetMap.find(rhsVar);
 						if(usedIter != offsetMap.end()){
-							outs()<<"Setting location of "<<rhsVar.toString()<<" at instruction "<<Var(&instruction).toString()<<"\n";
 							int usedOffset = usedIter->second;
 							in.set(usedOffset);
 						}
 					}
+					outs()<<instruction<<" :";
+					printBitVector(in, offsetToElementMap);
 					return in;
 				};
 
@@ -209,13 +213,14 @@ namespace llvm {
 				
 				// Iterating over all instructions in the basic blocks, fetch the IN set for each instruction.
 				outs()<<"-------Result Start----------\n";
+				outs()<<"----Basic Block Boundry----\n";
 				for(auto& bb : F){
 					for(auto& inst : bb){
-						outs()<<inst<<"\n";
 						auto in = result.find(&inst);
 						if(in != result.end()){
 							printBitVector(in->second, offsetToElementMap);
 						}
+						outs()<<inst<<"\n";
 					}
 					outs()<<"----Basic Block Boundry----\n";
 				}
