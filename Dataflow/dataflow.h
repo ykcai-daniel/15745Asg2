@@ -48,6 +48,7 @@ namespace llvm {
 			using OffsetToElementMap = DenseMap<int, Element>; // for printing
 			// Transfer function for a single instruction: state' = transfer(state, inst)
 			using TransferFunction = std::function<BitVector(BitVector, Instruction*)>;
+			using BlockTransferFunction = std::function<BitVector(BitVector,BasicBlock*,ResultMap&)>;
 
 			using InstToElementFunc = std::function<std::vector<Element>(Instruction*)>;
 
@@ -70,11 +71,42 @@ namespace llvm {
 			bool outInit
 		):  
 			meetOperator_(meetOperator),
-			transferFunc_(transferFunction),
 			bitVectorSize_(numElements),
 			entryInitValue_(entryInit),
-			outInitValue_(outInit){}
+			outInitValue_(outInit){
+				BlockTransferFunction btf = [transferFunction](BitVector in,BasicBlock* BB, ResultMap& resultMap)->BitVector{
+					BitVector out = in;
+					if constexpr (Forward) {
+						for (Instruction &I : *BB) {
+							out = transferFunction(out, &I);
+							resultMap[&I] = out;
+						}
+					} else {
+						for (auto it = BB->rbegin(); it != BB->rend(); ++it) {
+							Instruction &I = *it;
+							out = transferFunction(out, &I);
+							resultMap[&I] = out;
+						}
+					}
+					return out;
 
+				};
+				transferFunc_ = std::move(btf);
+
+			}
+
+		DataflowAnalysis(
+			const MeetOperator& meetOperator,
+			const BlockTransferFunction& transferFunction,
+			int numElements,
+			bool entryInit,
+			// TODO(optional): make outInit type trait of MeetOperator
+			bool outInit
+		): meetOperator_(meetOperator),
+		transferFunc_(transferFunction),
+			bitVectorSize_(numElements),
+			entryInitValue_(entryInit),
+			outInitValue_(outInit) {};
 		
 		// Create BitVectorOffsetMap by iterating over all instructions in func and applying getElementsFromInstruction to each instruction.
 		// The returned BitVectorOffsetMap maps each Element to a unique offset in the BitVector.
@@ -102,7 +134,7 @@ namespace llvm {
 			assert(map.size() == bitVectorSize_);
 			std::vector<BasicBlock*> PostOrder(po_begin(&func), po_end(&func));
 			// Now iterate in reverse (which gives you RPO)
-			if(!Forward){
+			if constexpr (!Forward){
 				outs()<<"Running backward analysis\n";
 				std::reverse(PostOrder.begin(), PostOrder.end());
 			}
@@ -122,7 +154,7 @@ namespace llvm {
 				).first->second;
 				// Initialize to TOP: TOP meet X = X
 				BitVector state;
-				if (Forward) {
+				if constexpr (Forward) {
 					if (pred_empty(BB)) {
 						// entry block init
 						state = BitVector(bitVectorSize_, entryInitValue_);
@@ -148,20 +180,8 @@ namespace llvm {
 					}
 				}
 				// Walk instructions and apply transfer per instruction
-				if (Forward) {
-					for (Instruction &I : *BB) {
-						state = transferFunc_(state, &I);
-						resultMap[&I] = state;
-					}
-				} else {
-					for (auto it = BB->rbegin(); it != BB->rend(); ++it) {
-						Instruction &I = *it;
-						state = transferFunc_(state, &I);
-						resultMap[&I] = state;
-						printBitVector(state, map);
-					}
-				}
-				BitVector newBoundary = state;
+
+				BitVector newBoundary = transferFunc_(state,BB,resultMap);
 				if(newBoundary!=oldBoundary){
 					changed = true;
 					blockBoundaryMap[BB] = std::move(newBoundary);
@@ -175,7 +195,7 @@ namespace llvm {
 		
 		private:
 			MeetOperator meetOperator_;
-			TransferFunction transferFunc_;
+			BlockTransferFunction transferFunc_;
 			int bitVectorSize_;
 			bool entryInitValue_;
 			bool outInitValue_;
