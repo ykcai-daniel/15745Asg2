@@ -40,6 +40,7 @@ namespace llvm {
 			// Result of Dataflow Analysis.
 			// ResultMap maps each instruction to bit vector state after processing that instruction.
 			using ResultMap = DenseMap<Instruction*, BitVector>;
+			using BlockResultMap = DenseMap<BasicBlock*, BitVector>;
 			// Meet operator.
 			using MeetOperator = std::function<BitVector(const BitVector&, const BitVector&)>;
 
@@ -130,7 +131,7 @@ namespace llvm {
 		}
 
 		// Perform forward/backward dataflow analysis on the given function and return per-instruction states.
-		ResultMap analyze(Function& func, const OffsetToElementMap& map){
+		std::pair<ResultMap,BlockResultMap> analyze(Function& func, const OffsetToElementMap& map){
 			assert(map.size() == bitVectorSize_);
 			std::vector<BasicBlock*> PostOrder(po_begin(&func), po_end(&func));
 			// Now iterate in reverse (which gives you RPO)
@@ -141,7 +142,7 @@ namespace llvm {
 
 			// Maintain per-basic-block boundary sets internally:
 			// Forward: OUT[BB]; Backward: IN[BB]
-			DenseMap<BasicBlock*, BitVector> blockBoundaryMap;
+			BlockResultMap blockBoundaryMap;
 			ResultMap resultMap;
 			bool changed;
 			int iterations =0;
@@ -189,8 +190,8 @@ namespace llvm {
 				}
             }
         } while (changed);
-		outs()<<"Iterations: "<<iterations<<"\n";
-			return resultMap;
+			outs()<<"Iterations: "<<iterations<<"\n";
+			return {std::move(resultMap),std::move(blockBoundaryMap)};
 		}
 		
 		private:

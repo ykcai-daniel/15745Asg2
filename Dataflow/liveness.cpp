@@ -209,19 +209,23 @@ namespace llvm {
 				};
 
 				LivenessAnalysis analysis(setUnion,transferFunction,offsetMap.size(),false,false);
-				LivenessAnalysis::ResultMap result = analysis.analyze(F, offsetToElementMap);
-				
+				std::pair<LivenessAnalysis::ResultMap,LivenessAnalysis::BlockResultMap> results = analysis.analyze(F, offsetToElementMap);
+				auto& instructionResults = results.first;
+				auto& blockResults = results.second;
+
 				// Iterating over all instructions in the basic blocks, fetch the IN set for each instruction.
 				outs()<<"-------Result Start----------\n";
 				outs()<<"----Basic Block Boundry----\n";
 				for(auto& bb : F){
+					
 					for(auto& inst : bb){
-						auto in = result.find(&inst);
-						if(in != result.end()){
+						auto in = instructionResults.find(&inst);
+						if(in != instructionResults.end()){
 							printBitVector(in->second, offsetToElementMap);
 						}
 						outs()<<inst<<"\n";
 					}
+					printBitVector(blockResults.lookup(&bb),offsetToElementMap);
 					outs()<<"----Basic Block Boundry----\n";
 				}
 

@@ -164,7 +164,8 @@ namespace {
 					true   // outInitValue_ = universal set
 				);
 
-				ExpressionAnalysis::ResultMap result = analysis.analyze(F, offsetToElement);
+				auto result = analysis.analyze(F, offsetToElement);
+				ExpressionAnalysis::ResultMap instructionResults = result.first;
 
 				// After convergence, print the IN and OUT sets of each instruction
 				// Iterating over all instructions in the basic blocks, fetch the IN set for each instruction.
@@ -172,10 +173,10 @@ namespace {
 				outs()<<"----Basic Block Boundry----\n";
 				for(auto& bb : F){
 					for(auto& inst : bb){
-						auto in = result.find(&inst);
+						auto out = instructionResults.find(&inst);
 						outs()<<inst<<"\n";
-						if(in != result.end()){
-							printBitVector(in->second, offsetToElement);
+						if(out != instructionResults.end()){
+							printBitVector(out->second, offsetToElement);
 						}
 					}
 					outs()<<"----Basic Block Boundry----\n";
