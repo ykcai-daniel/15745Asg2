@@ -19,6 +19,9 @@ namespace {
 		public:
 			static char ID;
 
+			using ExpressionAnalysis = DataflowAnalysis<Expression>;
+
+
 			AvailableExpressions() : FunctionPass(ID) { }
 
 			virtual bool runOnFunction(Function& F) {
@@ -138,7 +141,8 @@ namespace {
 				};
 
 				// define Transfer function for each basic block
-				auto transferFunc = [&](BitVector in, BasicBlock* BB) {
+				ExpressionAnalysis::BlockTransferFunction transferFunc = 
+				[&](BitVector in, BasicBlock* BB, ExpressionAnalysis::ResultMap& resultMap) {
 					BitVector out = in; // Initialize OUT[BB] = IN[BB]
 					for (Instruction &I : *BB) {
 						BitVector gen = computeGen(I);
@@ -146,12 +150,13 @@ namespace {
 
 						// OUT = (IN - KILL) ∪ GEN
 						out = (out - kill) + gen;
+						resultMap[&I] = out;
 					}
 					return out;
 				};
 
 				// create dataflow analysis object
-				DataflowAnalysis<Expression> analysis(
+				ExpressionAnalysis analysis(
 					meetOperator,
 					transferFunc,
 					bitVectorSize,
@@ -159,28 +164,21 @@ namespace {
 					true   // outInitValue_ = universal set
 				);
 
-				auto result = analysis.analyze(F, offsetToElement);
+				ExpressionAnalysis::ResultMap result = analysis.analyze(F, offsetToElement);
 
 				// After convergence, print the IN and OUT sets of each instruction
-				for (auto &B : F) {
-					BitVector in(bitVectorSize, true); // Top
-					if (pred_empty(&B)) {
-						in = BitVector(bitVectorSize, false); // entry = empty set
-					} else {
-						for (auto *Pred : predecessors(&B)) {
-							in &= result.lookup(Pred); // meet of all preds' OUT
+				// Iterating over all instructions in the basic blocks, fetch the IN set for each instruction.
+				outs()<<"-------Result Start----------\n";
+				outs()<<"----Basic Block Boundry----\n";
+				for(auto& bb : F){
+					for(auto& inst : bb){
+						auto in = result.find(&inst);
+						outs()<<inst<<"\n";
+						if(in != result.end()){
+							printBitVector(in->second, offsetToElement);
 						}
 					}
-
-					printBitVector(in, offsetToElement);
-
-					BitVector out = in;
-					for (Instruction &I : B) {
-						BitVector gen = computeGen(I);
-						BitVector kill = computeKill(I);
-						out = (out - kill) + gen;
-						printBitVector(out, offsetToElement);
-					}
+					outs()<<"----Basic Block Boundry----\n";
 				}
 
 				// Did not modify the incoming Function.
