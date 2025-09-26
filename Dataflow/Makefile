@@ -1,6 +1,6 @@
 all: liveness.so available.so
 
-CXXFLAGS = -rdynamic $(shell llvm-config --cxxflags) -g -O0
+CXXFLAGS = -rdynamic $(shell llvm-config --cxxflags) -g -O0 -fPIC
 
 dataflow.o: dataflow.cpp dataflow.h
 
