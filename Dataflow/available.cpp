@@ -170,7 +170,7 @@ namespace {
 				// After convergence, print the IN and OUT sets of each instruction
 				// Iterating over all instructions in the basic blocks, fetch the IN set for each instruction.
 				outs()<<"-------Result Start----------\n";
-				outs()<<"----Basic Block Boundry----\n";
+				outs()<<"----Basic Block Boundary----\n";
 				for(auto& bb : F){
 					for(auto& inst : bb){
 						auto out = instructionResults.find(&inst);
@@ -179,7 +179,7 @@ namespace {
 							printBitVector(out->second, offsetToElement);
 						}
 					}
-					outs()<<"----Basic Block Boundry----\n";
+					outs()<<"----Basic Block Boundary----\n";
 				}
 
 				// Did not modify the incoming Function.

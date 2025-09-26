@@ -240,7 +240,7 @@ namespace llvm {
 
 				// Iterating over all instructions in the basic blocks, fetch the IN set for each instruction.
 				outs()<<"-------Result Start----------\n";
-				outs()<<"----Basic Block Boundry----\n";
+				outs()<<"----Basic Block Boundary----\n";
 				for(auto& bb : F){
 					
 					for(auto& inst : bb){
@@ -251,7 +251,7 @@ namespace llvm {
 						outs()<<inst<<"\n";
 					}
 					//printBitVector(blockResults.lookup(&bb),offsetToElementMap);
-					outs()<<"----Basic Block Boundry----\n";
+					outs()<<"----Basic Block Boundary----\n";
 				}
 
 				// Did not modify the incoming Function.
