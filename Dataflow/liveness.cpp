@@ -118,13 +118,38 @@ namespace llvm {
 
 			virtual bool runOnFunction(Function& F) override {
 
+				DenseMap<Value*, Value*> aliasMap;
+
+				// A helper to find canonical representative
+				std::function<Value*(Value*)> findRepresentative = [&](Value *v) -> Value* {
+					while (aliasMap.count(v)) {
+						v = aliasMap[v];
+					}
+					return v;
+				};
+
+				// Build alias sets by scanning phi instructions
+				for (auto &B : F) {
+					for (auto &I : B) {
+						if (auto *phi = dyn_cast<PHINode>(&I)) {
+							Value *lhs = &I; // phi result
+							for (unsigned i = 0; i < phi->getNumIncomingValues(); i++) {
+								Value *rhs = phi->getIncomingValue(i);
+								// Union: map rhs -> lhs
+								aliasMap[rhs] = lhs;
+							}
+						}
+					}
+				}
+
+
 				// All Elements to involve in the analysis.
-				LivenessAnalysis::InstToElementFunc instToElementFunc = [](Instruction* inst)->std::vector<Var>{
+				LivenessAnalysis::InstToElementFunc instToElementFunc = [&findRepresentative](Instruction* inst)->std::vector<Var>{
 					// return and branch are not variables, so they should not be involved.
 					if(isa<ReturnInst>(inst)||isa<BranchInst>(inst)){
 						return {};
 					}
-					return {Var(inst)};
+					return {Var(findRepresentative(inst))};
 				};
 
 				auto offsetMap = LivenessAnalysis::createBitVectorOffsetMap(F, instToElementFunc);
@@ -138,11 +163,11 @@ namespace llvm {
 				outs()<<"Variables to be analyzed:";
 				printBitVector(BitVector(offsetMap.size(),true), offsetToElementMap);
 
-				LivenessAnalysis::TransferFunction transferFunction = [&offsetMap,&offsetToElementMap](const BitVector& out, Instruction* inst){
+				LivenessAnalysis::TransferFunction transferFunction = [&findRepresentative,&offsetMap,&offsetToElementMap](const BitVector& out, Instruction* inst){
 					BitVector in = out;
 					Instruction& instruction = *inst;
-
-					Var var(&instruction);
+					
+					Var var(findRepresentative(&instruction));
 					// If the current instruction in a variable, it will have an entry in the offset map.
 					// Place the variable in killset if it is defined.
 					auto offsetMapIter = offsetMap.find(var);
@@ -157,7 +182,7 @@ namespace llvm {
 						PHINode* phi = dyn_cast<PHINode>(&instruction);
 						for(unsigned i = 0; i < phi->getNumIncomingValues(); i++){
 							Value* val = phi->getIncomingValue(i);
-							Var rhsVar(val);
+							Var rhsVar(findRepresentative(val));
 							auto usedIter = offsetMap.find(rhsVar);
 							if(usedIter != offsetMap.end()){
 								int usedOffset = usedIter->second;
@@ -174,7 +199,7 @@ namespace llvm {
 					if(br){
 						if (br->isConditional()) {
 							Value* condition = br->getCondition();  // Direct method
-							Var rhsVar(condition);
+							Var rhsVar(findRepresentative(condition));
 							auto usedIter = offsetMap.find(rhsVar);
 							if(usedIter != offsetMap.end()){
 								int usedOffset = usedIter->second;
@@ -189,7 +214,7 @@ namespace llvm {
 						if(!val){
 							continue;
 						}
-						Var rhsVar(val);
+						Var rhsVar(findRepresentative(val));
 
 						auto usedIter = offsetMap.find(rhsVar);
 						if(usedIter != offsetMap.end()){
@@ -225,7 +250,7 @@ namespace llvm {
 						}
 						outs()<<inst<<"\n";
 					}
-					printBitVector(blockResults.lookup(&bb),offsetToElementMap);
+					//printBitVector(blockResults.lookup(&bb),offsetToElementMap);
 					outs()<<"----Basic Block Boundry----\n";
 				}
 
