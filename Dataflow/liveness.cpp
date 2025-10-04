@@ -2,21 +2,11 @@
 // Group:
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "llvm/IR/Function.h"
-#include "llvm/Pass.h"
-#include "llvm/Support/raw_ostream.h"
-#include <llvm/ADT/STLExtras.h>
-#include <llvm/IR/InstrTypes.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/Value.h>
-#include <llvm/Support/Casting.h>
-#include <llvm/ADT/BitVector.h>
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Instruction.h>
 #include <memory>
 #include <vector>
 
 #include "dataflow.h"
+#include "llvm/Pass.h"
 
 using namespace llvm;
 
@@ -52,12 +42,6 @@ namespace llvm {
 				else {
 					return "\"" + inst + "\"";
 				}
-			}
-			else if (ConstantInt * cint = dyn_cast<ConstantInt>(v)) {
-				std::string s = "";
-				raw_string_ostream * strm = new raw_string_ostream(s);
-				cint->getValue().print(*strm,true);
-				return strm->str();
 			}
 			else if (Argument *arg = dyn_cast<Argument>(v)) {
 				std::string s = "";
@@ -159,10 +143,6 @@ namespace llvm {
 					offsetToElementMap.insert({v,k});
 				}
 
-				// All variables:
-				outs()<<"Variables to be analyzed:";
-				printBitVector(BitVector(offsetMap.size(),true), offsetToElementMap);
-
 				LivenessAnalysis::TransferFunction transferFunction = [&findRepresentative,&offsetMap,&offsetToElementMap](const BitVector& out, Instruction* inst){
 					BitVector in = out;
 					Instruction& instruction = *inst;
@@ -189,7 +169,6 @@ namespace llvm {
 								in.set(usedOffset);
 							}
 						}
-						outs()<<instruction<<" :";
 						printBitVector(in, offsetToElementMap);
 						return in;
 					}
@@ -222,7 +201,6 @@ namespace llvm {
 							in.set(usedOffset);
 						}
 					}
-					outs()<<instruction<<" :";
 					printBitVector(in, offsetToElementMap);
 					return in;
 				};
